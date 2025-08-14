@@ -4,59 +4,60 @@ import yfinance as yf
 
 st.set_page_config(page_title="Stock Scout", layout="wide")
 
-# Title
-st.title("📊 Stock Scout")
-
-# Stock universe selection
-universe = st.selectbox(
-    "Select Stock Universe",
-    ["NSE Large Cap", "NSE Mid Cap", "NSE Penny Stocks"]
-)
-
-# Sample stock lists
-stock_lists = {
-    "NSE Large Cap": ["RELIANCE.NS", "TCS.NS", "INFY.NS"],
-    "NSE Mid Cap": ["ADANIGREEN.NS", "IRCTC.NS", "NAM-INDIA.NS"],
-    "NSE Penny Stocks": ["SUZLON.NS", "YESBANK.NS", "IDEA.NS"]
-}
-
-selected_stocks = stock_lists.get(universe, [])
-
-if not selected_stocks:
-    st.error("No stocks found for the selected universe.")
-else:
+# ---------------- SAFE FETCH FUNCTION ----------------
+@st.cache_data
+def fetch_prices(symbol):
     try:
-        data = []
-        for ticker in selected_stocks:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="1y")
+        df = yf.download(symbol, period="1d", interval="1m")
 
-            # Skip if no data
-            if hist.empty:
-                continue
+        # If no data returned
+        if df.empty or 'Close' not in df.columns:
+            return None
 
-            current_price = hist["Close"].iloc[-1]
+        # Get last close price
+        last_close = df['Close'].iloc[-1]
 
-            week_return = None
-            if len(hist) >= 5:
-                week_return = ((hist["Close"].iloc[-1] / hist["Close"].iloc[-5]) - 1) * 100
+        # Handle NaN in last close
+        if pd.isna(last_close):
+            valid_rows = df['Close'].dropna()
+            if valid_rows.empty:
+                return None
+            last_close = valid_rows.iloc[-1]
 
-            year_return = None
-            if len(hist) > 0:
-                year_return = ((hist["Close"].iloc[-1] / hist["Close"].iloc[0]) - 1) * 100
+        return float(last_close)
 
-            data.append({
-                "Stock": ticker,
-                "Current Price (INR)": round(current_price, 2),
-                "7 Day Return (%)": round(week_return, 2) if week_return is not None else None,
-                "12 Month Return (%)": round(year_return, 2) if year_return is not None else None
-            })
+    except Exception:
+        return None
 
-        if not data:
-            st.warning("No price data could be fetched for the selected stocks.")
-        else:
-            df = pd.DataFrame(data)
-            st.dataframe(df, use_container_width=True)
+# ---------------- INDIAN NSE STOCK LIST ----------------
+stock_symbols = [
+    "RELIANCE.NS",  # Reliance Industries
+    "TCS.NS",       # Tata Consultancy Services
+    "INFY.NS",      # Infosys
+    "HDFCBANK.NS",  # HDFC Bank
+    "ICICIBANK.NS", # ICICI Bank
+    "SBIN.NS",      # State Bank of India
+    "BHARTIARTL.NS",# Bharti Airtel
+    "ITC.NS",       # ITC Limited
+    "LT.NS",        # Larsen & Toubro
+    "ASIANPAINT.NS" # Asian Paints
+]
 
-    except Exception as e:
-        st.error(f"Error fetching stock data: {e}")
+# ---------------- UI ----------------
+st.title("📊 Stock Scout - NSE Live Prices")
+st.subheader("Live NSE stock prices (updates on refresh)")
+
+# Fetch prices
+data = []
+for symbol in stock_symbols:
+    price = fetch_prices(symbol)
+    if price is None:
+        data.append({"Symbol": symbol.replace(".NS", ""), "Price (₹)": "-"})
+    else:
+        data.append({"Symbol": symbol.replace(".NS", ""), "Price (₹)": f"{price:.2f}"})
+
+# Display table
+df_prices = pd.DataFrame(data)
+st.dataframe(df_prices, use_container_width=True)
+
+st.caption("Data provided by Yahoo Finance | Prices update on page refresh")
