@@ -1,103 +1,99 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
+import yfinance as yf
 from datetime import datetime, timedelta
 
-# ------------------------------
-# Helper function to get company name
-# ------------------------------
+# ----------------------------
+# Config
+# ----------------------------
+st.set_page_config(page_title="Stock Scout", layout="wide")
+
+# ----------------------------
+# Helper Functions
+# ----------------------------
+def fetch_data(ticker, period_days):
+    end = datetime.today()
+    start = end - timedelta(days=period_days)
+    data = yf.download(ticker, start=start, end=end)
+    data['SMA20'] = data['Close'].rolling(window=20).mean()
+    return data
+
 def get_company_name(ticker):
     try:
-        return yf.Ticker(ticker).info.get("longName", ticker)
+        info = yf.Ticker(ticker).info
+        return info.get('longName', ticker)
     except:
         return ticker
 
-# ------------------------------
-# Fetch price data
-# ------------------------------
-@st.cache_data
-def fetch_prices(tickers, days):
-    end_date = datetime.today()
-    start_date = end_date - timedelta(days=days)
-    data = {}
-    for ticker in tickers:
-        df = yf.download(ticker, start=start_date, end=end_date)
-        if not df.empty:
-            df['SMA20'] = df['Close'].rolling(window=20).mean()
-            data[ticker] = df
-    return data
+def get_suggestion(latest_price, sma20, invest_per_stock):
+    # Ensure scalar values
+    if not isinstance(latest_price, (int, float)):
+        latest_price = float(latest_price.iloc[-1]) if hasattr(latest_price, "iloc") else float(latest_price)
 
-# ------------------------------
-# Suggestion logic
-# ------------------------------
-def get_suggestion(latest_price, sma20, invest_price):
-    if pd.isna(sma20):  # Not enough data for SMA
+    if not isinstance(sma20, (int, float)):
+        sma20 = float(sma20.iloc[-1]) if hasattr(sma20, "iloc") else float(sma20)
+
+    variance_inr = invest_per_stock - latest_price
+
+    # Suggestion logic
+    if latest_price > sma20 and abs(variance_inr) <= 0.05 * invest_per_stock:
         return "Wait"
-    variance_pct = ((latest_price - invest_price) / invest_price) * 100
-    if latest_price > sma20 and abs(variance_pct) <= 5:
-        return "Invest"
-    return "Wait"
-
-# ------------------------------
-# Color formatting for Suggestion
-# ------------------------------
-def color_suggestion(suggestion):
-    if suggestion == "Invest":
-        return f"<span style='color:green; font-weight:bold'>{suggestion}</span>"
     else:
-        return f"<span style='color:red; font-weight:bold'>{suggestion}</span>"
+        return "Invest"
 
-# ------------------------------
-# Streamlit App Layout
-# ------------------------------
-st.set_page_config(page_title="Stock Scout", layout="wide")
+# ----------------------------
+# UI
+# ----------------------------
+st.title("📊 Stock Scout")
 
-st.title("📈 Stock Scout")
+# Slider for time frame
+period_map = {
+    "7 Days": 7,
+    "15 Days": 15,
+    "1 Month": 30,
+    "3 Months": 90,
+    "6 Months": 180,
+    "12 Months": 365,
+    "3 Years": 1095,
+    "5 Years": 1825
+}
 
-# Login simulation (placeholder)
-username = st.text_input("Username")
-password = st.text_input("Password", type="password")
+timeframe = st.select_slider(
+    "Select Time Frame:",
+    options=list(period_map.keys()),
+    value="1 Month"
+)
 
-if username and password:  # No real auth yet
-    st.success(f"Welcome {username}!")
+# Investment amount per stock
+invest_per_stock = st.number_input("Investment per Stock (INR)", value=1000, step=100)
 
-    # Choose stocks
-    tickers_input = st.text_area("Enter stock tickers (comma separated)", "TCS.NS, RELIANCE.NS, INFY.NS")
-    tickers = [t.strip() for t in tickers_input.split(",") if t.strip()]
+# Universe of stocks (Example)
+tickers = ["TCS.NS", "INFY.NS", "RELIANCE.NS", "HDFCBANK.NS"]
 
-    # Timeframe
-    days = st.slider("Select timeframe (days from today)", min_value=30, max_value=365, value=180)
+# Fetch & Display Data
+rows = []
+for ticker in tickers:
+    df = fetch_data(ticker, period_map[timeframe])
+    if df.empty:
+        continue
 
-    # Investment per stock
-    invest_per_stock = st.number_input("Investment price per stock (INR)", value=3500)
+    company_name = get_company_name(ticker)
+    latest_price = df['Close'].iloc[-1]
+    sma20 = df['SMA20'].iloc[-1]
+    variance_inr = int(round(invest_per_stock - latest_price, 0))
+    suggestion = get_suggestion(latest_price, sma20, invest_per_stock)
 
-    if st.button("Fetch Data"):
-        prices_data = fetch_prices(tickers, days)
+    rows.append({
+        "Company": company_name,
+        "Latest Price (INR)": int(round(latest_price, 0)),
+        "SMA20 (INR)": int(round(sma20, 0)) if pd.notna(sma20) else None,
+        "Variance (INR)": variance_inr,
+        "Suggestion": suggestion
+    })
 
-        results = []
-        for ticker, df in prices_data.items():
-            latest_price = df['Close'].iloc[-1]
-            sma20 = df['SMA20'].iloc[-1]
-            company_name = get_company_name(ticker)
-            variance_inr = latest_price - invest_per_stock
-            suggestion = get_suggestion(latest_price, sma20, invest_per_stock)
+df_display = pd.DataFrame(rows)
 
-            results.append({
-                "Company": company_name,
-                "Current Price (₹)": int(latest_price),
-                "SMA20 (₹)": int(sma20) if not pd.isna(sma20) else None,
-                "Variance (₹)": int(variance_inr),
-                "Suggestion": color_suggestion(suggestion)
-            })
+# Remove decimals
+df_display = df_display.applymap(lambda x: int(x) if isinstance(x, float) else x)
 
-        df_results = pd.DataFrame(results)
-        # Render with HTML to keep colors
-        st.markdown(df_results.to_html(escape=False, index=False), unsafe_allow_html=True)
-
-else:
-    st.warning("Please log in to view stock data.")
-
-# ------------------------------
-# Placeholder for ML model
-# ------------------------------
-# In the future, replace `get_suggestion()` with ML model predictions here.
+st.dataframe(df_display, use_container_width=True)
