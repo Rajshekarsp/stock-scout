@@ -1,0 +1,5 @@
+streamlit==1.36.0
+pandas>=2.0.0
+numpy>=1.23.0
+yfinance>=0.2.40
+streamlit-aggrid==0.3.4.post3
